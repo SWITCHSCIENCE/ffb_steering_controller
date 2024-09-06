@@ -17,14 +17,11 @@ var (
 	ph = pid.NewPIDHandler()
 	js = joystick.UseSettings(joystick.Definitions{
 		ReportID:     1,
-		ButtonCnt:    24,
+		ButtonCnt:    0,
 		HatSwitchCnt: 0,
 		AxisDefs: []joystick.Constraint{
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
-			{MinIn: 0, MaxIn: 32767, MinOut: 0, MaxOut: 32767},
-			{MinIn: 0, MaxIn: 32767, MinOut: 0, MaxOut: 32767},
-			{MinIn: 0, MaxIn: 32767, MinOut: 0, MaxOut: 32767},
-			{MinIn: 0, MaxIn: 32767, MinOut: 0, MaxOut: 32767},
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
 		},
 	}, ph.RxHandler, ph.SetupHandler, pid.Descriptor)
@@ -39,8 +36,11 @@ type Joystick interface {
 
 type Wheel struct {
 	Joystick
-	calc func() []int32
-	can  *mcp2515.Device
+	calc      func() []int32
+	can       *mcp2515.Device
+	lastAngle int32
+	lastTime  time.Time
+	sleep     bool
 }
 
 func NewWheel(can *mcp2515.Device) *Wheel {
@@ -106,13 +106,43 @@ func (w *Wheel) Loop(ctx context.Context) error {
 			if cnt < 300 {
 				output = output * int32(cnt) / 300
 			}
-			if err := motor.Output(w.can, int16(limit1(output))); err != nil {
+			v := int16(limit1(output))
+			if w.sleep {
+				v = 0
+			}
+			if err := motor.Output(w.can, v); err != nil {
 				return err
+			}
+			now := time.Now()
+			timeout := now.Sub(w.lastTime) > 10*time.Second
+			d := (angle - w.lastAngle)
+			active := utils.Abs(d) > 40
+			wakeup := utils.Abs(d) > 800
+			if !w.sleep {
+				if active {
+					w.lastTime = now
+					w.lastAngle = angle
+				}
+				if timeout {
+					w.sleep = true
+					println("enter sleep mode")
+					//motor.Disable(w.can)
+					w.lastTime = now
+					w.lastAngle = angle
+				}
+			} else {
+				if wakeup {
+					w.sleep = false
+					println("leave sleep mode")
+					//motor.Enable(w.can)
+					w.lastTime = now
+					w.lastAngle = angle
+				}
 			}
 			limitAngle := int(limit1(angle))
 			w.SetAxis(0, limitAngle)
-			w.SetAxis(5, limitAngle)
-			if cnt%10 == 0 {
+			w.SetAxis(2, limitAngle)
+			if !w.sleep && cnt%10 == 0 {
 				w.SendState()
 			}
 		}

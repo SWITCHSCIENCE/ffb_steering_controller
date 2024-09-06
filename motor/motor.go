@@ -5,6 +5,7 @@ package motor
 import (
 	"encoding/binary"
 	"runtime"
+	"time"
 
 	"tinygo.org/x/drivers/mcp2515"
 )
@@ -89,6 +90,27 @@ func GetState(can *mcp2515.Device) (*MotorState, error) {
 }
 
 var buf = make([]byte, 8)
+
+func Enable(can *mcp2515.Device) error {
+	if err := can.Tx(0x105, 8, []byte{0x0A, 0, 0, 0, 0, 0, 0, 0}); err != nil {
+		return err
+	}
+	if _, err := ReadFrame(can); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	return Setup(can)
+}
+
+func Disable(can *mcp2515.Device) error {
+	if err := can.Tx(0x105, 8, []byte{0x09, 0, 0, 0, 0, 0, 0, 0}); err != nil {
+		return err
+	}
+	if _, err := ReadFrame(can); err != nil {
+		return err
+	}
+	return nil
+}
 
 func Output(can *mcp2515.Device, pow int16) error {
 	binary.BigEndian.PutUint16(buf[0:2], uint16(-pow))
