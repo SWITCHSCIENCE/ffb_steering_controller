@@ -21,7 +21,7 @@ var (
 		HatSwitchCnt: 0,
 		AxisDefs: []joystick.Constraint{
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
-			//{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
 			//{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
 		},
 	}, ph.RxHandler, ph.SetupHandler, pid.Descriptor)
