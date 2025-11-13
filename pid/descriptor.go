@@ -11,7 +11,7 @@ var Descriptor = []byte{
 	/*
 		// Stick
 		0x05, 0x01, // USAGE_PAGE (Generic Desktop)
-		0x09, 0x30, // USAGE (Y)
+		0x09, 0x30, // USAGE (X)
 		0x09, 0x31, // USAGE (Y)
 		0x16, 0x01, 0x80, // LOGICAL_MINIMUM (-32767)
 		0x26, 0xff, 0x7f, // LOGICAL_MAXIMUM (32767)
@@ -22,7 +22,8 @@ var Descriptor = []byte{
 
 	// Steering
 	0x05, 0x02, // USAGE_PAGE (Simulation Controls)
-	0x09, 0xc8, // USAGE (Steering)
+	0x09, 0x30, // USAGE (X)
+	//0x09, 0xc8, // USAGE (Steering)
 	0x16, 0x01, 0x80, // LOGICAL_MINIMUM (-32767)
 	0x26, 0xff, 0x7f, // LOGICAL_MAXIMUM (32767)
 	0x75, 0x10, // REPORT_SIZE (16)
