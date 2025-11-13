@@ -141,7 +141,7 @@ func (w *Wheel) Loop(ctx context.Context) error {
 			}
 			limitAngle := int(limit1(angle))
 			w.SetAxis(0, limitAngle)
-			//w.SetAxis(2, limitAngle)
+			w.SetAxis(1, limitAngle)
 			if !w.sleep && cnt%10 == 0 {
 				w.SendState()
 			}
