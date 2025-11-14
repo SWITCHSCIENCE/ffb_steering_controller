@@ -105,6 +105,9 @@ const (
 func TO_LT_END_16(x uint16) uint16 { return ((x << 8) & 0xFF00) | ((x >> 8) & 0x00FF) }
 
 func NormalizeRange(x, maxValue int32) int32 {
+	if maxValue == 0 {
+		return x
+	}
 	return int32(x) / int32(maxValue)
 }
 
