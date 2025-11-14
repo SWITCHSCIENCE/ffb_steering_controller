@@ -10,6 +10,18 @@ import (
 	"github.com/SWITCHSCIENCE/ffb_steering_controller/logger"
 )
 
+var buffer = make([]byte, 1024)
+
+func dump(src []byte) []byte {
+	const hex = "0123456789abcdef"
+	for i, b := range src {
+		buffer[i*2] = hex[b>>4]
+		buffer[i*2+1] = hex[b&0x0f]
+	}
+	buffer[len(src)*2] = '\n'
+	return buffer[:len(src)*2+1]
+}
+
 type PIDHandler struct {
 	effectStates []*TEffectState
 	pidBlockLoad PIDBlockLoadFeatureData
@@ -57,7 +69,8 @@ func (m *PIDHandler) RxHandler(b []byte) {
 	if len(b) == 0 {
 		return
 	}
-	reportId := ReportID(b[0])
+	//machine.Serial.Write(dump(b))
+	reportId := b[0]
 	switch reportId {
 	case ReportSetEffect: // 0x01
 		m.SetEffect(b)
@@ -134,6 +147,7 @@ func (m *PIDHandler) GetProtocol(setup usb.Setup) bool {
 }
 
 func (m *PIDHandler) SetReport(setup usb.Setup) bool {
+	//println("set report:", setup.WValueL, setup.WValueH, setup.WIndex, setup.WLength)
 	reportId := setup.WValueL
 	switch setup.WValueH {
 	case hid.REPORT_TYPE_INPUT:
@@ -176,6 +190,7 @@ func (m *PIDHandler) SetProtocol(setup usb.Setup) bool {
 }
 
 func (m *PIDHandler) SetupHandler(setup usb.Setup) bool {
+	println("setup:", setup.BmRequestType, setup.BRequest)
 	switch setup.BmRequestType {
 	case usb.REQUEST_DEVICETOHOST_CLASS_INTERFACE:
 		switch setup.BRequest {
@@ -228,8 +243,9 @@ func (m *PIDHandler) StartEffect(id uint8) {
 		// unknown id
 		return
 	}
+	println("start effect:", id)
 	effect := m.effectStates[id]
-	effect.State = MEFFECTSTATE_PLAYING
+	effect.State |= MEFFECTSTATE_PLAYING
 	effect.ElapsedTime = 0
 	effect.StartTime = uint64(time.Now().UnixMilli())
 }
@@ -239,6 +255,7 @@ func (m *PIDHandler) StopEffect(id uint8) {
 		// unknown id
 		return
 	}
+	println("stop effect:", id)
 	effect := m.effectStates[id]
 	effect.State &= ^MEFFECTSTATE_PLAYING
 	m.pidBlockLoad.RamPoolAvailable += SIZE_EFFECT
@@ -276,6 +293,7 @@ func (m *PIDHandler) SetEffect(b []byte) {
 	effect.EffectType = v.EffectType
 	effect.Gain = v.Gain
 	effect.EnableAxis = v.EnableAxis
+	effect.State |= MEFFECTSTATE_ALLOCATED
 }
 
 // SetEnvelope reportId == 0x02
@@ -369,7 +387,7 @@ func (m *PIDHandler) EffectOperation(b []byte) {
 		case 0xff:
 			effect.Duration = USB_DURATION_INFINITE
 		default:
-			effect.Duration *= uint16(v.LoopCount)
+			effect.LoopCount = v.LoopCount
 		}
 		m.StartEffect(v.EffectBlockIndex)
 	case EOStartSolo:
@@ -431,14 +449,24 @@ func (m *PIDHandler) SetCustomForce(b []byte) {
 
 func (m *PIDHandler) CalcForces() []int32 {
 	forces := []int32{0, 0}
+	if m.paused {
+		return forces
+	}
 	for _, ef := range m.effectStates {
-		if ef.State == MEFFECTSTATE_PLAYING &&
-			(ef.Duration == USB_DURATION_INFINITE ||
-				ef.ElapsedTime <= ef.Duration) &&
-			!m.paused {
-			forces[0] += ef.Force(m.gains, m.params, 0)
-			forces[1] += ef.Force(m.gains, m.params, 1)
+		if ef.State&MEFFECTSTATE_ALLOCATED == 0 {
+			continue
 		}
+		if ef.State&MEFFECTSTATE_PLAYING == 0 {
+			continue
+		}
+		if ef.Duration != USB_DURATION_INFINITE {
+			if ef.ElapsedTime > ef.Duration*uint16(ef.LoopCount) {
+				ef.State &= ^MEFFECTSTATE_PLAYING
+				continue
+			}
+		}
+		forces[0] += ef.Force(m.gains, m.params, 0)
+		forces[1] += ef.Force(m.gains, m.params, 1)
 	}
 	return forces
 }

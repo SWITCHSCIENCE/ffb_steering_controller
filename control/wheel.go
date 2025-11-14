@@ -20,8 +20,8 @@ var (
 		ButtonCnt:    0,
 		HatSwitchCnt: 0,
 		AxisDefs: []joystick.Constraint{
-			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
-			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // X-Axis
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // Y-Axis
 			//{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
 		},
 	}, ph.RxHandler, ph.SetupHandler, pid.Descriptor)
@@ -141,7 +141,7 @@ func (w *Wheel) Loop(ctx context.Context) error {
 			}
 			limitAngle := int(limit1(angle))
 			w.SetAxis(0, limitAngle)
-			w.SetAxis(1, limitAngle)
+			//w.SetAxis(1, limitAngle)
 			if !w.sleep && cnt%10 == 0 {
 				w.SendState()
 			}

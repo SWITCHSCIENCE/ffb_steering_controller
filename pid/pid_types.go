@@ -24,22 +24,31 @@ type EffectState uint8
 type EffectOperation uint8
 
 const (
-	ReportPIDStatusInputData ReportID = 0x02
+	UsageX        = 0x30
+	UsageY        = 0x31
+	UsageSteering = 0xc8
+)
 
-	ReportSetEffect              ReportID = 0x01
-	ReportSetEnvelope            ReportID = 0x02
-	ReportSetCondition           ReportID = 0x03
-	ReportSetPeriodic            ReportID = 0x04
-	ReportSetConstantForce       ReportID = 0x05
-	ReportSetRampForce           ReportID = 0x06
-	ReportSetCustomForceData     ReportID = 0x07
-	ReportSetDownloadForceSample ReportID = 0x08
-	ReportEffectOperation        ReportID = 0x0a
-	ReportBlockFree              ReportID = 0x0b
-	ReportDeviceControl          ReportID = 0x0c
-	ReportDeviceGain             ReportID = 0x0d
-	ReportSetCustomForce         ReportID = 0x0e
+const (
+	ReportPIDStatusInputData = 0x02
+
+	ReportSetEffect              = 0x01
+	ReportSetEnvelope            = 0x02
+	ReportSetCondition           = 0x03
+	ReportSetPeriodic            = 0x04
+	ReportSetConstantForce       = 0x05
+	ReportSetRampForce           = 0x06
+	ReportSetCustomForceData     = 0x07
+	ReportSetDownloadForceSample = 0x08
+	ReportEffectOperation        = 0x0a
+	ReportBlockFree              = 0x0b
+	ReportDeviceControl          = 0x0c
+	ReportDeviceGain             = 0x0d
+	ReportSetCustomForce         = 0x0e
 	//Report ReportID = 0x08
+	ReportNewEffectBlock  = 0x11
+	ReportLoadEffectBlock = 0x12
+	ReportPIDPool         = 0x13
 
 	ControlEnableActuators  ControlType = 0x01
 	ControlDisableActuators ControlType = 0x02
@@ -77,6 +86,19 @@ const (
 	INERTIA_DEADBAND  = 0x30
 	FRICTION_DEADBAND = 0x30
 
+	HID_USAGE_CONSTANT     = 0x26 //    Usage ET Constant Force
+	HID_USAGE_RAMP         = 0x27 //    Usage ET Ramp
+	HID_USAGE_SQUARE       = 0x30 //    Usage ET Square
+	HID_USAGE_SINE         = 0x31 //    Usage ET Sine
+	HID_USAGE_TRIANGLE     = 0x32 //    Usage ET Triangle
+	HID_USAGE_SAWTOOTHUP   = 0x33 //    Usage ET Sawtooth Up
+	HID_USAGE_SAWTOOTHDOWN = 0x34 //    Usage ET Sawtooth Down
+	HID_USAGE_SPRING       = 0x40 //    Usage ET Spring
+	HID_USAGE_DAMPER       = 0x41 //    Usage ET Damper
+	HID_USAGE_INERTIA      = 0x42 //    Usage ET Inertia
+	HID_USAGE_FRICTION     = 0x43 //    Usage ET Friction
+	HID_USAGE_CUSTOM       = 0x28 //    Usage ET Custom
+
 	USB_DURATION_INFINITE = 0x7fff
 )
 
@@ -109,8 +131,8 @@ type SetEffectOutputData struct {
 
 func (s *SetEffectOutputData) UnmarshalBinary(b []byte) error {
 	s.ReportID = ReportID(b[0])
-	s.EffectBlockIndex = b[0]
-	s.EffectType = EffectType(b[0])
+	s.EffectBlockIndex = b[1]
+	s.EffectType = EffectType(b[2])
 	s.Duration = binary.LittleEndian.Uint16(b[3:5])
 	s.TriggerRepeatInterval = binary.LittleEndian.Uint16(b[5:7])
 	s.SamplePeriod = binary.LittleEndian.Uint16(b[7:9])
@@ -433,6 +455,7 @@ type TEffectState struct {
 	EndMagnitude   int16
 	Period         uint16 // 0..32767 ms
 	Duration       uint16
+	LoopCount      uint8
 	ElapsedTime    uint16
 	StartTime      uint64
 }
@@ -464,6 +487,7 @@ func (ef *TEffectState) Clear() {
 	ef.EndMagnitude = 0
 	ef.Period = 0
 	ef.Duration = 0
+	ef.LoopCount = 255
 	ef.ElapsedTime = 0
 	ef.StartTime = 0
 }
