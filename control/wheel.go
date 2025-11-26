@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"machine/usb/hid/joystick"
+	"sync"
 	"time"
 
 	"tinygo.org/x/drivers/mcp2515"
@@ -14,8 +15,9 @@ import (
 )
 
 var (
-	ph = pid.NewPIDHandler()
-	js = joystick.UseSettings(joystick.Definitions{
+	ph       = pid.NewPIDHandler()
+	limitS16 = utils.Limit(-32767, 32767)
+	js       = joystick.UseSettings(joystick.Definitions{
 		ReportID:     1,
 		ButtonCnt:    0,
 		HatSwitchCnt: 0,
@@ -23,6 +25,8 @@ var (
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // X-Axis
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // Y-Axis
 			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767},
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // Rx-Axis
+			{MinIn: -32767, MaxIn: 32767, MinOut: -32767, MaxOut: 32767}, // Ry-Axis
 		},
 	}, ph.RxHandler, ph.SetupHandler, pid.Descriptor)
 )
@@ -36,11 +40,15 @@ type Joystick interface {
 
 type Wheel struct {
 	Joystick
-	calc      func() []int32
-	can       *mcp2515.Device
-	lastAngle int32
-	lastTime  time.Time
-	sleep     bool
+	calc                   func() []int32
+	can                    *mcp2515.Device
+	mu                     sync.RWMutex
+	coggingTorqueCancel    int32
+	viscosity              int32
+	softLockForceMagnitude int32
+	fit                    func(x int32) int32
+	limitForce             func(x int32) int32
+	rx, ry                 int32
 }
 
 func NewWheel(can *mcp2515.Device) *Wheel {
@@ -49,35 +57,40 @@ func NewWheel(can *mcp2515.Device) *Wheel {
 		calc:     ph.CalcForces,
 		can:      can,
 	}
+	settings.SubscribeClear()
+	settings.SubscribeAdd(w.update)
 	return w
+}
+
+func (w *Wheel) update(s settings.Settings) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.coggingTorqueCancel = s.CoggingTorqueCancel
+	w.viscosity = s.Viscosity
+	w.softLockForceMagnitude = s.SoftLockForceMagnitude
+	HalfLock2Lock := s.Lock2Lock / 2
+	MaxAngle := 32768*HalfLock2Lock/360 - 1
+	w.fit = utils.Map(-MaxAngle, MaxAngle, -32767, 32767)
+	w.limitForce = utils.Limit(-s.MaxCenteringForce, s.MaxCenteringForce)
+	motor.SetNeutralAdjust(s.NeutralAdjust)
+	return nil
+}
+
+func (w *Wheel) SetRStick(x, y int32) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.rx = limitS16(x)
+	w.ry = limitS16(y)
 }
 
 func (w *Wheel) Loop(ctx context.Context) error {
 	if err := motor.Setup(w.can); err != nil {
 		return err
 	}
-	CoggingTorqueCancel := int32(0)
-	Viscosity := int32(0)
-	SoftLockForceMagnitude := int32(0)
-	var fit = func(x int32) int32 { return x }
-	var limitForce = func(x int32) int32 { return x }
-	settings.SubscribeClear()
-	settings.SubscribeAdd(func(s settings.Settings) error {
-		CoggingTorqueCancel = s.CoggingTorqueCancel
-		Viscosity = s.Viscosity
-		SoftLockForceMagnitude = s.SoftLockForceMagnitude
-		HalfLock2Lock := s.Lock2Lock / 2
-		MaxAngle := 32768*HalfLock2Lock/360 - 1
-		fit = utils.Map(-MaxAngle, MaxAngle, -32767, 32767)
-		limitForce = utils.Limit(-s.MaxCenteringForce, s.MaxCenteringForce)
-		motor.SetNeutralAdjust(s.NeutralAdjust)
-		return nil
-	})
-	if err := settings.Restore(); err != nil {
-		return err
-	}
-	limit1 := utils.Limit(-32767, 32767)
 	cnt := 0
+	sleep := false
+	angle, lastAngle := int32(0), int32(0)
+	lastTime := time.Now()
 	tick := time.NewTicker(1 * time.Millisecond)
 	for {
 		select {
@@ -88,61 +101,68 @@ func (w *Wheel) Loop(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			w.mu.RLock()
 			verocity := 256 * int32(state.Verocity) / 220
-			angle := fit(state.Angle)
-			output := limitForce(-angle)          // Centering
-			cog := CoggingTorqueCancel * verocity // Cogging Torque Cancel
-			decel := -Viscosity * pow3(verocity)  // Viscosity
-			output += int32(cog + decel)          // Sum
+			angle = w.fit(state.Angle)
+			output := w.limitForce(-angle)          // Centering
+			cog := w.coggingTorqueCancel * verocity // Cogging Torque Cancel
+			decel := -w.viscosity * pow3(verocity)  // Viscosity
+			output += int32(cog + decel)            // Sum
 			force := w.calc()
 			switch {
 			case angle > 32767:
-				output -= SoftLockForceMagnitude * (angle - 32767)
+				output -= w.softLockForceMagnitude * (angle - 32767)
 			case angle < -32767:
-				output -= SoftLockForceMagnitude * (angle + 32767)
+				output -= w.softLockForceMagnitude * (angle + 32767)
 			}
 			output -= force[0]
 			cnt++
 			if cnt < 300 {
-				output = output * int32(cnt) / 300
+				output = output * int32(cnt) / 300 // slow start
 			}
-			v := int16(limit1(output))
-			if w.sleep {
+			v := int16(limitS16(output))
+			if sleep {
 				v = 0
 			}
+			rx, ry := w.rx, w.ry
+			w.mu.RUnlock()
 			if err := motor.Output(w.can, v); err != nil {
 				return err
 			}
 			now := time.Now()
-			timeout := now.Sub(w.lastTime) > 10*time.Second
-			d := (angle - w.lastAngle)
+			timeout := now.Sub(lastTime) > 10*time.Second
+			d := (angle - lastAngle)
 			active := utils.Abs(d) > 40
 			wakeup := utils.Abs(d) > 800
-			if !w.sleep {
+			w.mu.Lock()
+			if !sleep {
 				if active {
-					w.lastTime = now
-					w.lastAngle = angle
+					lastTime = now
+					lastAngle = angle
 				}
 				if timeout {
-					w.sleep = true
-					println("enter sleep mode")
+					sleep = true
+					//println("enter sleep mode")
 					//motor.Disable(w.can)
-					w.lastTime = now
-					w.lastAngle = angle
+					lastTime = now
+					lastAngle = angle
 				}
 			} else {
 				if wakeup {
-					w.sleep = false
-					println("leave sleep mode")
+					sleep = false
+					//println("leave sleep mode")
 					//motor.Enable(w.can)
-					w.lastTime = now
-					w.lastAngle = angle
+					lastTime = now
+					lastAngle = angle
 				}
 			}
-			limitAngle := int(limit1(angle))
-			w.SetAxis(0, limitAngle)
-			w.SetAxis(2, limitAngle)
-			if !w.sleep && cnt%10 == 0 {
+			w.mu.Unlock()
+			limitedAngle := int(limitS16(angle))
+			w.SetAxis(0, limitedAngle)
+			w.SetAxis(2, limitedAngle)
+			w.SetAxis(3, int(rx))
+			w.SetAxis(4, int(ry))
+			if !sleep {
 				w.SendState()
 			}
 		}

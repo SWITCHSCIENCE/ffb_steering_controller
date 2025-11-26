@@ -1,6 +1,12 @@
 package settings
 
-import "fmt"
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"io"
+)
 
 type Settings struct {
 	NeutralAdjust          float32 // unit:deg
@@ -11,14 +17,47 @@ type Settings struct {
 	SoftLockForceMagnitude int32   // unit:100*n %
 }
 
+func Marshal(s Settings) []byte {
+	buf := bytes.NewBuffer(nil)
+	binary.Write(buf, binary.LittleEndian, s.NeutralAdjust)
+	binary.Write(buf, binary.LittleEndian, s.Lock2Lock)
+	binary.Write(buf, binary.LittleEndian, s.CoggingTorqueCancel)
+	binary.Write(buf, binary.LittleEndian, s.Viscosity)
+	binary.Write(buf, binary.LittleEndian, s.MaxCenteringForce)
+	binary.Write(buf, binary.LittleEndian, s.SoftLockForceMagnitude)
+	hash := sha256.Sum256(buf.Bytes())
+	buf.Write(hash[:])
+	return buf.Bytes()
+}
+
+func Unmarshal(b []byte) (Settings, error) {
+	check := bytes.NewBuffer(nil)
+	buf := bytes.NewBuffer(b)
+	tee := io.TeeReader(buf, check)
+	var s Settings
+	binary.Read(tee, binary.LittleEndian, &s.NeutralAdjust)
+	binary.Read(tee, binary.LittleEndian, &s.Lock2Lock)
+	binary.Read(tee, binary.LittleEndian, &s.CoggingTorqueCancel)
+	binary.Read(tee, binary.LittleEndian, &s.Viscosity)
+	binary.Read(tee, binary.LittleEndian, &s.MaxCenteringForce)
+	binary.Read(tee, binary.LittleEndian, &s.SoftLockForceMagnitude)
+	calculated := sha256.Sum256(check.Bytes())
+	hash := make([]byte, 32)
+	tee.Read(hash)
+	if !bytes.Equal(hash, calculated[:]) {
+		return s, fmt.Errorf("invalid hash")
+	}
+	return s, nil
+}
+
 var (
 	defaultSettings = Settings{
-		NeutralAdjust:          -6.5, // unit:deg
-		Lock2Lock:              540,  // unit:deg
-		CoggingTorqueCancel:    128,  // unit:100*n/256 %
-		Viscosity:              128,  // unit:100*n/256 %
-		MaxCenteringForce:      500,  // unit:100*n/32767 %
-		SoftLockForceMagnitude: 8,    // unit:100*n %
+		NeutralAdjust:          -6.5, // unit:deg   -180.0...180.0
+		Lock2Lock:              540,  // unit:deg   180..1440
+		CoggingTorqueCancel:    128,  // unit:100*n/256 %  0..255
+		Viscosity:              128,  // unit:100*n/256 %  0..255
+		MaxCenteringForce:      0,    // unit:100*n/32767 %  0..2048
+		SoftLockForceMagnitude: 8,    // unit:100*n %  0..15
 	}
 	currentSettings = defaultSettings
 	subscribe       []func(s Settings) error
@@ -54,25 +93,11 @@ func SubscribeAdd(f func(s Settings) error) {
 	subscribe = append(subscribe, f)
 }
 
-func Restore() error {
-	s := defaultSettings
-	// TODO: implement to read from flash memory
-	if err := Update(s); err != nil {
-		currentSettings = defaultSettings
-		Update(currentSettings)
-		return err
-	}
-	return nil
+func Default() Settings {
+	return defaultSettings
 }
 
-func Save(s Settings) error {
-	if err := Validate(s); err != nil {
-		return err
-	}
-	// TODO: implement to write to flash memory
-	return nil
-}
-
+// Update
 func Update(s Settings) error {
 	if err := Validate(s); err != nil {
 		return err

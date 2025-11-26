@@ -188,7 +188,7 @@ func (m *PIDHandler) SetProtocol(setup usb.Setup) bool {
 }
 
 func (m *PIDHandler) SetupHandler(setup usb.Setup) bool {
-	println("setup:", setup.BmRequestType, setup.BRequest)
+	//println("setup:", setup.BmRequestType, setup.BRequest)
 	switch setup.BmRequestType {
 	case usb.REQUEST_DEVICETOHOST_CLASS_INTERFACE:
 		switch setup.BRequest {

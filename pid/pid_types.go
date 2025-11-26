@@ -26,6 +26,8 @@ type EffectOperation uint8
 const (
 	UsageX        = 0x30
 	UsageY        = 0x31
+	UsageRx       = 0x33
+	UsageRy       = 0x34
 	UsageSteering = 0xc8
 )
 

@@ -27,6 +27,16 @@ var Descriptor = []byte{
 	0x95, 0x01, // REPORT_COUNT (1)
 	0x81, 0x02, // INPUT (Data/Var/Abs)
 
+	// Stick
+	0x05, 0x01, // USAGE_PAGE (Generic Desktop)
+	0x09, UsageRx, // USAGE (Rx)
+	0x09, UsageRy, // USAGE (Ry)
+	0x16, 0x01, 0x80, // LOGICAL_MINIMUM (-32767)
+	0x26, 0xff, 0x7f, // LOGICAL_MAXIMUM (32767)
+	0x75, 0x10, // REPORT_SIZE (16)
+	0x95, 0x02, // REPORT_COUNT (2)
+	0x81, 0x02, // INPUT (Data/Var/Abs)
+
 	// end collection
 	0xc0, // END_COLLECTION #1
 
